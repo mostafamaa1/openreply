@@ -16,7 +16,11 @@
 
 import Redis from "ioredis";
 
-const RATE_LIMIT_MAX = 750; // private replies per hour, per Meta's documented cap
+// Default 600 rather than Meta's documented 750: comment fetches, public
+// replies and follow-status checks draw on the same per-account quota, so the
+// DM leg gets a margin instead of the whole ceiling. Raise or lower with
+// DM_RATE_LIMIT_MAX_PER_HOUR.
+const RATE_LIMIT_MAX = Number(process.env.DM_RATE_LIMIT_MAX_PER_HOUR ?? 600);
 const RATE_LIMIT_WINDOW = 3600; // 1 hour in seconds
 const REQUEUE_DELAY_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_REQUEUE_ATTEMPTS = 3;

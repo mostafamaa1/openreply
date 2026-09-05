@@ -41,6 +41,16 @@ import {
 
 const BACKOFF_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
 
+// How widely a previous DM suppresses the next one for the same person.
+// "campaign" (default) = once per person per campaign; "account" = once per
+// person across every campaign on the connected account.
+const PERSON_DEDUP_SCOPE =
+  process.env.DM_PERSON_SCOPE === "account" ? "account" : "campaign";
+// 0 (the default) means the suppression never expires: that person is not DM'd
+// by this campaign again. Set a number of hours to let it repeat after a gap.
+const PERSON_DEDUP_COOLDOWN_MS =
+  Number(process.env.DM_PERSON_COOLDOWN_HOURS ?? 0) * 60 * 60 * 1000;
+
 function formatError(error: unknown): string {
   if (error instanceof MetaApiError) {
     return `Meta API Error ${error.code}: ${error.message}`;
@@ -429,6 +439,49 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           status: "SKIPPED_DEDUP",
           matchedKeyword: matchResult.matchedKeyword,
           errorMessage: `Another campaign (${privateReplyUsedBy.automation?.name ?? "unknown"}) already sent the one private reply Instagram allows for this comment`,
+        },
+      });
+      continue;
+    }
+
+    // Per-person dedupe, on top of the per-comment dedupe above.
+    //
+    // Meta's one-private-reply-per-comment rule does not stop the same person
+    // from being DM'd again when they comment a second time. To the recipient
+    // that reads as a bot spamming them, so a campaign delivers to a given
+    // commenter once and then stays quiet.
+    //
+    // Scope is the campaign by default: someone who asks for the book list and
+    // later asks for the website still gets both, because those are different
+    // campaigns carrying different content. Set DM_PERSON_SCOPE=account to
+    // widen it to every campaign on the account, and DM_PERSON_COOLDOWN_HOURS
+    // to let the DM repeat after a while (unset = never repeats).
+    const priorSend = await prisma.dmLog.findFirst({
+      where: {
+        commenterId,
+        status: "SENT",
+        ...(PERSON_DEDUP_SCOPE === "account"
+          ? { instagramAccountId: automation.instagramAccountId }
+          : { automationId: automation.id }),
+        ...(PERSON_DEDUP_COOLDOWN_MS > 0
+          ? {
+              dmSentAt: {
+                gte: new Date(Date.now() - PERSON_DEDUP_COOLDOWN_MS),
+              },
+            }
+          : {}),
+      },
+      select: { dmSentAt: true, automation: { select: { name: true } } },
+    });
+    if (priorSend) {
+      await prisma.dmLog.update({
+        where: {
+          automationId_commentId: { automationId: automation.id, commentId },
+        },
+        data: {
+          status: "SKIPPED_DEDUP",
+          matchedKeyword: matchResult.matchedKeyword,
+          errorMessage: `Already DM'd this person from ${priorSend.automation?.name ?? "this campaign"}${priorSend.dmSentAt ? ` on ${priorSend.dmSentAt.toISOString()}` : ""}`,
         },
       });
       continue;
