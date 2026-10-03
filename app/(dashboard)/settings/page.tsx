@@ -3,6 +3,10 @@
 import { Suspense, useEffect, useState } from "react";
 import type { AccountOption } from "@/components/account-select";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
+import ContentAgentSettings from "@/components/content-agent-settings";
+import PasswordSettings from "@/components/password-settings";
+import { PanelHeader } from "@/components/broadcast/primitives";
+import { Gauge, Plug, Users } from "lucide-react";
 
 interface SettingsData {
   workspace: {
@@ -137,7 +141,7 @@ export default function SettingsPage() {
       </Suspense>
 
       <section className="panel rounded p-4 sm:p-6">
-        <h2 className="text-base font-semibold mb-6">Instagram Connection</h2>
+        <PanelHeader icon={Plug} title="Instagram Connection" description="The accounts OpenReply replies for." />
 
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3 py-3 border-b border-border">
@@ -211,7 +215,7 @@ export default function SettingsPage() {
         <div className="mt-6 pt-4 border-t border-border flex gap-3">
           <a
             href="/api/instagram/connect"
-            className="px-4 py-2 rounded text-sm font-medium transition-colors bg-accent text-white hover:bg-accent-hover"
+            className="px-4 py-2 rounded text-sm font-medium transition-colors bg-accent text-on-accent hover:bg-accent-hover"
           >
             {accounts.length > 0 ? "Connect another account" : "Connect Instagram"}
           </a>
@@ -219,7 +223,7 @@ export default function SettingsPage() {
       </section>
 
       <section className="panel rounded p-4 sm:p-6">
-        <h2 className="text-base font-semibold mb-6">Team</h2>
+        <PanelHeader icon={Users} title="Team" description="Who can manage this workspace." />
         <div className="space-y-3">
           {membersData?.members.map((member) => (
             <div
@@ -241,7 +245,7 @@ export default function SettingsPage() {
 
         {membersData?.invitations.length ? (
           <div className="mt-6 border-t border-border pt-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
               Pending invites
             </p>
             <div className="space-y-3">
@@ -309,7 +313,7 @@ export default function SettingsPage() {
             <button
               type="submit"
               disabled={busy === "invite"}
-              className="rounded bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+              className="rounded bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50"
             >
               {busy === "invite" ? "Inviting..." : "Invite"}
             </button>
@@ -320,8 +324,12 @@ export default function SettingsPage() {
         )}
       </section>
 
+      <PasswordSettings />
+
+      <ContentAgentSettings canEdit={canManageMembers} />
+
       <section className="panel rounded p-4 sm:p-6">
-        <h2 className="text-base font-semibold mb-6">Usage</h2>
+        <PanelHeader icon={Gauge} title="Usage" description="What this workspace has used so far." />
         <div className="flex items-center justify-between gap-3 py-3">
           <div>
             <p className="text-sm font-medium text-foreground">

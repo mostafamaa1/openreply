@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import { readCache, writeCache } from "@/lib/client-cache";
+import CampaignFunnel from "@/components/campaign-funnel";
 
 interface Campaign {
   id: string;
@@ -328,12 +329,20 @@ export default function CampaignsPage() {
           </Link>
           <Link
             href="/campaigns/new"
-            className="flex-1 rounded bg-accent px-4 py-2 text-center text-sm font-medium text-white hover:bg-accent-hover sm:flex-none"
+            className="flex-1 rounded bg-accent px-4 py-2 text-center text-sm font-medium text-on-accent hover:bg-accent-hover sm:flex-none"
           >
             New Campaign
           </Link>
         </div>
       </div>
+
+      {automations.length > 0 && <CampaignFunnel instagramAccountId={selectedAccountId} />}
+
+      {automations.length > 0 && (
+        <h2 className="pt-2 font-display text-lg font-bold uppercase tracking-wide text-foreground">
+          All campaigns
+        </h2>
+      )}
 
       {/* Search + status filter */}
       {automations.length > 0 && (
@@ -342,7 +351,7 @@ export default function CampaignsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search campaigns by name, keyword, or message…"
-            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent/40 focus:outline-none"
           />
           <div className="inline-flex shrink-0 rounded-lg bg-surface p-1">
             {(["all", "active", "paused"] as const).map((s) => (
@@ -372,7 +381,7 @@ export default function CampaignsPage() {
           </p>
           <Link
             href="/campaigns/new"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded bg-accent text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded bg-accent text-sm font-semibold text-on-accent hover:bg-accent-hover transition-colors"
           >
             Create Campaign
           </Link>
@@ -461,12 +470,12 @@ export default function CampaignsPage() {
                     </span>
                   )}
                   {auto.requireFollow && (
-                    <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                    <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent-ink">
                       Follow gate
                     </span>
                   )}
                   {auto.trackedLinks.length >= 2 && (
-                    <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                    <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent-ink">
                       2 links
                     </span>
                   )}
@@ -477,7 +486,7 @@ export default function CampaignsPage() {
                   {auto.keywords.map((kw) => (
                     <span
                       key={kw}
-                      className="px-2 py-0.5 rounded-md bg-accent/10 text-accent text-xs font-medium border border-accent/10"
+                      className="px-2 py-0.5 rounded-md bg-accent/10 text-accent-ink text-xs font-medium border border-accent/10"
                     >
                       {kw}
                     </span>
@@ -489,13 +498,13 @@ export default function CampaignsPage() {
 
                 {/* Tracked link sent */}
                 {auto.trackedLinks[0]?.trackedUrl && (
-                  <p className="mt-2 truncate font-mono text-xs text-zinc-500">
+                  <p className="mt-2 truncate font-mono text-xs text-muted">
                     {auto.trackedLinks[0].trackedUrl}
                   </p>
                 )}
 
                 {/* Stats */}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs text-zinc-500">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs text-muted">
                   <span className="font-medium text-foreground">
                     {auto._count.dmLogs} runs
                   </span>
@@ -546,7 +555,7 @@ export default function CampaignsPage() {
                   onClick={() => toggleActive(auto.id, auto.isActive)}
                   className={`
                     relative w-11 h-6 rounded-full transition-colors
-                    ${auto.isActive ? "bg-accent" : "bg-zinc-300"}
+                    ${auto.isActive ? "bg-accent" : "bg-border-hover"}
                   `}
                 >
                   <span
