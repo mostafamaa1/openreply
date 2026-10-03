@@ -16,7 +16,7 @@ ManyChat does this and charges a monthly fee. OpenReply is the same core feature
 
 > **OpenReply is self-hosted. You have to deploy your own copy.**
 >
-> [openreply.diwen.dev](https://openreply.diwen.dev) is a demo of the dashboard, not a service you can sign up for. Creating an account there will never send a DM for you, and there is no hosted plan to upgrade to.
+> [openreply.diwen.dev](https://openreply.diwen.dev) is a demo instance, not a service you can sign up for. It opens on the sign-in page; creating an account there will never send a DM for you, and there is no hosted plan to upgrade to.
 >
 > Instagram automation runs against *your* Meta app, and Meta ties that app to a domain and a webhook URL you control. So a working instance means: your fork deployed, your domain pointed at it, your Meta app created, and your webhook registered. [docs/setup.md](docs/setup.md) walks through all of it.
 
@@ -44,6 +44,8 @@ OpenReply is built around Meta's official Instagram private replies. It does not
 - Inbox. Read your Instagram DM conversations and reply from the dashboard, inside Meta's 24-hour messaging window. Cached so it loads instantly on repeat visits.
 - DM logs. Every send, skip, and failure is logged with a reason.
 - Self-comment filtering. Your own comments never trigger a reply, since Meta rejects DMing yourself anyway.
+- Content agents (optional). Five Gemini-powered agents — Ideator, Hook & Script, Planner, Analyst, DM Manager — pull your own post history and competitors' posts, tag every post with a content category, and send a weekly Telegram digest. See [docs/setup.md](docs/setup.md#environment-variables) for the env vars that turn it on.
+- Analytics. Follower trends per day/week/30-day window, a posting-time heatmap, trend charts, and a campaign funnel, with a global date-range picker and light/dark themes.
 
 ## How it works
 
@@ -57,7 +59,7 @@ The web app receives the webhook and serves the dashboard. A separate worker pro
 
 ## Quick start
 
-You need a few free accounts before anything works: a Meta developer app, a Resend account for login emails, and somewhere to host (Vercel for the web app, Railway for the worker plus Postgres and Redis). The Instagram account you connect has to be a Business or Creator account, not a personal one.
+You need a few free accounts before anything works: a Meta developer app, a Resend account for login emails (only if you want the magic-link fallback), and somewhere to host (Vercel for the web app, Railway for the worker plus Postgres and Redis). The Instagram account you connect has to be a Business or Creator account, not a personal one.
 
 The honest version: the code deploys in minutes, but the Meta app setup is the part that takes real time. Read [docs/setup.md](docs/setup.md) before you start. It is the single setup guide, covering hosting, your domain, the environment, and every Meta wrong turn so you do not have to find them yourself.
 
@@ -93,11 +95,11 @@ If you use Claude Code, Cursor, or a similar tool, the Meta setup is a lot faste
 - Next.js 16 and React 19 for the web app and API routes
 - Prisma 7 with PostgreSQL
 - BullMQ on Redis for the send queue and the worker
-- Auth.js (NextAuth) with email magic links through Resend
+- Auth.js (NextAuth): sign in with email + password, or an email magic link through Resend
 - Tailwind CSS for the interface
 - The official Instagram API with Instagram Login
 
-For the complete stack — application libraries, the two runtime processes, and the free services this runs on (Vercel, Neon, Redis Cloud, an Oracle Cloud always-free VM for the worker, Resend, Meta) — see [docs/stack.md](docs/stack.md).
+For the complete stack — application libraries, the two runtime processes, and the free services this runs on (Vercel, Supabase, Redis Cloud, an Oracle Cloud always-free VM for the worker, Resend, Meta) — see [docs/stack.md](docs/stack.md).
 
 ## Contributing
 

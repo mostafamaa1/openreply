@@ -19,7 +19,7 @@ The web app and the worker must share the same `DATABASE_URL`, the same `REDIS_U
 
 - A Facebook account. Meta developer registration is built on it. There is no Instagram-only path.
 - An Instagram Business or Creator account. A personal account cannot be connected. Switch it in the Instagram app under Settings, Account type, if needed.
-- A [Resend](https://resend.com) account for login emails, with a verified sender domain. Login is email magic links only, so without this nobody can sign in. If you already run your own mail server, you can point `EMAIL_SERVER` at it instead and skip Resend entirely — see the [environment variables](#environment-variables) table.
+- A [Resend](https://resend.com) account for login emails, with a verified sender domain — only needed for the magic-link fallback; the primary sign-in is email + password, set with `npm run set-password -- you@example.com`. If you already run your own mail server, you can point `EMAIL_SERVER` at it instead and skip Resend entirely — see the [environment variables](#environment-variables) table.
 - Somewhere to host. The recommended setup, used throughout this guide, is Vercel for the web app and Railway for the worker plus Postgres and Redis. Both have free tiers that are enough to run this for a single account.
 
 ## Hosting and your domain
@@ -90,11 +90,12 @@ Copy `.env.example` to `.env` for local work, or set these in Vercel and Railway
 | `NEXTAUTH_SECRET` | Random secret. `openssl rand -base64 32` |
 | `CRON_SECRET` | Random secret protecting the token-refresh cron. |
 | `ENCRYPTION_KEY` | 32-byte hex. `openssl rand -hex 32`. Encrypts Instagram tokens. Identical across web and worker. |
-| `DATABASE_URL` | PostgreSQL connection string. Public Railway URL on Vercel; internal on the worker. |
+| `DATABASE_URL` | PostgreSQL connection string. Public Railway URL on Vercel; internal on the worker. On Supabase, the transaction pooler (port `6543`); see [Using Supabase for Postgres](#using-supabase-for-postgres). |
+| `DIRECT_URL` | Optional, web app only. A session-mode connection string that `prisma migrate` uses instead of `DATABASE_URL`. Needed when `DATABASE_URL` goes through a transaction-mode pooler, because migrations hold a session-level lock. |
 | `REDIS_URL` | Redis connection string. Must support blocking commands, so an HTTP-only Redis will not work with BullMQ. |
-| `RESEND_API_KEY` | Resend key. Login is email magic links only, so without this nobody can sign in. |
+| `RESEND_API_KEY` | Resend key, for the magic-link fallback only. Primary sign-in is email + password (`npm run set-password`); without this, the "Email me a sign-in link" option just fails. |
 | `EMAIL_FROM` | A sender on a domain you verified in Resend. The placeholder will not deliver. |
-| `ALLOWED_EMAILS` | Optional. Comma-separated allowlist of addresses that may sign in, case insensitive. Unset, anyone who reaches your public URL can request a magic link and gets their own workspace, which is worth closing on an instance you run for yourself. |
+| `ALLOWED_EMAILS` | Optional. Comma-separated allowlist of addresses that may sign in, case insensitive. Unset, anyone who reaches your public URL can sign up (password or magic link) and gets their own workspace, which is worth closing on an instance you run for yourself. |
 | `EMAIL_SERVER` | Optional. An SMTP URL, for example `smtps://login%40example.com:password@mail.example.com:465`. Set it to send magic links through your own mail server instead of Resend; then `RESEND_API_KEY` is not needed. URL-encode special characters in the user and password (`@` becomes `%40`). Port 465 with `smtps://` is implicit TLS, port 587 with `smtp://` is STARTTLS. |
 | `META_GRAPH_API_VERSION` | Graph API version, for example `v25.0`. |
 | `INSTAGRAM_APP_ID` | From the Meta app, see Step 6. |
@@ -104,6 +105,25 @@ Copy `.env.example` to `.env` for local work, or set these in Vercel and Railway
 
 `ENCRYPTION_KEY` must be exactly 64 hex characters or the app throws on boot.
 
+Optional, for the content agents (Ideator, Hook & Script, Planner, Analyst, DM Manager —
+the dashboard's Agents page). Leave them unset to run without this feature:
+
+| Variable | What it is |
+| --- | --- |
+| `APIFY_TOKEN` | From your [Apify](https://apify.com) account. Pulls competitor posts (`apify~instagram-scraper`), $5/month free, then metered; a per-run cap keeps one cycle cheap. Unset, competitor data is skipped. |
+| `APIFY_COMPETITOR_POST_LIMIT` | Optional. Posts pulled per competitor per refresh, default 30. |
+| `GEMINI_API_KEY` | From [Google AI Studio](https://aistudio.google.com), free tier. Powers all five agents. |
+| `GEMINI_MODEL` / `GEMINI_FALLBACK_MODELS` | Optional. Model to try first, then a comma-separated fallback chain if it 404s/503s/times out. |
+| `AGENTS_TIMEZONE` | IANA name (for example `Asia/Riyadh`). Used for the weekly schedule and the dashboard's day buckets. Set it on the worker AND the web app. |
+| `AGENTS_CRON` | Optional. Cron syntax in `AGENTS_TIMEZONE`, default Saturday 20:00 (`0 20 * * 6`). |
+| `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather). Sends the weekly digest. |
+| `TELEGRAM_CHAT_ID` | Required if `TELEGRAM_BOT_TOKEN` is set. Message the bot once, then run `npm run agents -- telegram-chat` to find it. |
+| `AGENTS_WORKSPACE_ID` | Optional. Which workspace's digest goes to that chat; needed only with more than one workspace that has a content profile. |
+
+Set your first password with `npm run set-password -- you@example.com`, and drive the
+agents from the CLI (`npm run agents -- profile`, `pull`, `run`, `digest`, …) with
+`npm run agents -- --help`.
+
 Optional, for tuning the polling reconciler (defaults are fine to start):
 
 | Variable | Default | What it does |
@@ -111,6 +131,25 @@ Optional, for tuning the polling reconciler (defaults are fine to start):
 | `COMMENT_POLL_INTERVAL_MS` | `300000` | How often the worker sweeps for missed comments (5 min). |
 | `COMMENT_POLL_MAX_PER_SWEEP` | `30` | Max new comments each campaign acts on per sweep. Keep it conservative; higher gets closer to Instagram's rate limits. |
 | `COMMENT_POLL_LOOKBACK_HOURS` | `72` | How far back a sweep considers comments. |
+| `NEXT_REEL_POLL_INTERVAL_MS` | `3600000` | How often the worker checks whether a "next reel" campaign's reel has been published (1 hour). |
+
+Optional, for tuning DM sending (set on the worker):
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `DM_PERSON_SCOPE` | `campaign` | How widely one DM suppresses the next for the same person. `campaign` sends once per person per campaign; `account` sends once per person across every campaign on the connected account. Suppressed comments show as `SKIPPED_DEDUP` in the logs, and the public reply still goes out. |
+| `DM_PERSON_COOLDOWN_HOURS` | `0` | Hours after which the same person can be DM'd again. `0` means never. |
+| `DM_RATE_LIMIT_MAX_PER_HOUR` | `600` | Max DMs per connected account per hour, kept under Instagram's limits. |
+
+### Using Supabase for Postgres
+
+Supabase's free plan works as a drop-in for the Railway Postgres above, and has no compute-hour cap, so the worker's constant polling is free. (Neon's free plan does cap compute, and polling every 5 minutes keeps it awake until the cap pauses the project.)
+
+1. Create a project, then click Connect. Use the pooler strings (`*.pooler.supabase.com`), not the direct connection, which is IPv6-only and unreachable from Vercel and most VMs.
+2. Set `DATABASE_URL` to the transaction pooler, port `6543`, on both Vercel and the worker. The session pooler (port `5432`) allows only 15 clients on the free plan, and serverless functions plus the worker run out (`EMAXCONNSESSION`).
+3. Set `DIRECT_URL` on Vercel only, to the same string with port `5432`. `prisma migrate deploy` in the build uses it.
+4. Append `?sslmode=require&uselibpqcompat=true` to both. With plain `sslmode=require`, the `pg` driver rejects Supabase's certificate chain (`self-signed certificate in certificate chain`).
+5. Run migrations once from your machine with `DIRECT_URL` set, or let the Vercel build do it.
 
 ## The Meta app
 
