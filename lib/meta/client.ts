@@ -588,7 +588,9 @@ export async function getUserMedia(
  */
 export async function getAllUserMedia(
   accessToken: string,
-  max = 500
+  max = 500,
+  /** Stop paging once a page ends with a post older than this. */
+  since?: Date
 ): Promise<InstagramMedia[]> {
   const results: InstagramMedia[] = [];
 
@@ -607,6 +609,9 @@ export async function getAllUserMedia(
     }>(response);
     results.push(...page.data);
     nextUrl = page.paging?.next ?? null;
+    // Media comes newest first, so later pages are all older still.
+    const oldest = page.data.at(-1)?.timestamp;
+    if (since && oldest && new Date(oldest) < since) nextUrl = null;
   }
 
   return results.slice(0, max);
