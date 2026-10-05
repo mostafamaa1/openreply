@@ -43,12 +43,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full dark">
-      <body
-        className="min-h-full bg-background text-foreground font-sans antialiased"
-        // Clears the home indicator when installed; 0 everywhere else.
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      >
+    <html lang="en" className="h-full" suppressHydrationWarning>
+      {/*
+        No safe-area padding here: the dashboard shell's own main and mobile
+        tab bar already clear the home indicator, and stacking this on top
+        made the document taller than the viewport on notched phones.
+      */}
+      <body className="min-h-full bg-background text-foreground font-sans antialiased">
         {children}
         <Analytics />
       </body>

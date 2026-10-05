@@ -15,6 +15,9 @@ model User {
   email         String?   @unique
   emailVerified DateTime?
   image         String?
+  /// scrypt hash (lib/password.ts). Null until a password is set; the user
+  /// can still sign in with an email link.
+  passwordHash  String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -84,6 +87,9 @@ model Workspace {
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
+  contentProfile    ContentProfile?
+  competitors       Competitor[]
+  agentRuns         AgentRun[]
 
   @@index([ownerId])
 }
@@ -141,6 +147,7 @@ model InstagramAccount {
   dmLogs      DmLog[]
   linkClicks  LinkClick[]
   followerSnapshots FollowerSnapshot[]
+  postCategories    PostCategory[]
 
   @@index([workspaceId])
 }
@@ -248,6 +255,7 @@ model DmLog {
 
   @@unique([automationId, commentId])
   @@index([workspaceId])
+  @@index([workspaceId, createdAt])
   @@index([automationId])
   @@index([instagramAccountId])
   @@index([status])
@@ -343,6 +351,110 @@ model OperationalEvent {
   @@index([source])
   @@index([level])
   @@index([createdAt])
+}
+
+/// Who the content agents write for. Lives in the database rather than in a
+/// committed file because the repo is public. One per workspace.
+model ContentProfile {
+  id          String   @id @default(cuid())
+  workspaceId String   @unique
+  niche       String   @default("")
+  voice       String   @default("")
+  audience    String   @default("")
+  goals       String   @default("")
+  /// Topics the Ideator plans across and posts are tagged with. Empty means
+  /// the defaults in lib/agents/categories.ts.
+  categories  String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+/// A public Instagram account the agents benchmark against. Its posts come from
+/// Apify, because Business Discovery needs Facebook Login and this app uses
+/// Instagram Login.
+model Competitor {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  username       String
+  followersCount Int?
+  lastScrapedAt  DateTime?
+  createdAt      DateTime  @default(now())
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  posts     CompetitorPost[]
+
+  @@unique([workspaceId, username])
+}
+
+model CompetitorPost {
+  id           String    @id @default(cuid())
+  competitorId String
+  shortCode    String
+  url          String
+  /// As Apify reports it: Video, Image or Sidecar.
+  type         String
+  caption      String?
+  views        Int?
+  likes        Int?
+  comments     Int?
+  postedAt     DateTime?
+  scrapedAt    DateTime  @default(now())
+
+  competitor Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  @@unique([competitorId, shortCode])
+  @@index([competitorId, postedAt])
+}
+
+/// One run of one content agent. `output` holds what the agent produced, so the
+/// Agents page can show it and the Telegram digest can quote it.
+model AgentRun {
+  id          String         @id @default(cuid())
+  workspaceId String
+  agent       AgentKind
+  status      AgentRunStatus @default(RUNNING)
+  output      Json?
+  error       String?
+  startedAt   DateTime       @default(now())
+  finishedAt  DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, agent, startedAt])
+}
+
+/// The topic of one of the account's own posts. "AI" tags come from the
+/// categorizer and may be refreshed; "MANUAL" tags are the creator's and are
+/// never overwritten.
+model PostCategory {
+  id                 String   @id @default(cuid())
+  instagramAccountId String
+  mediaId            String
+  category           String
+  source             String   @default("AI")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([instagramAccountId, mediaId])
+  @@index([instagramAccountId, category])
+}
+
+enum AgentKind {
+  IDEATOR
+  HOOK_SCRIPT
+  PLANNER
+  ANALYST
+  DM_MANAGER
+}
+
+enum AgentRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
 }
 
 enum WorkspaceRole {

@@ -90,15 +90,15 @@ export default function ImportCampaignsPage() {
           Paste a CSV with one row per campaign. Each row opens in the builder
           prefilled and editable, so you can review it and pick the reel before
           saving. Required columns are{" "}
-          <code className="text-accent">keywords</code> and{" "}
-          <code className="text-accent">dm_message</code>. Optional:{" "}
-          <code className="text-accent">name</code>,{" "}
-          <code className="text-accent">public_reply</code>,{" "}
-          <code className="text-accent">tracked_url</code>,{" "}
-          <code className="text-accent">opening_dm</code>,{" "}
-          <code className="text-accent">opening_dm_button</code>. Keywords go in
+          <code className="text-accent-ink">keywords</code> and{" "}
+          <code className="text-accent-ink">dm_message</code>. Optional:{" "}
+          <code className="text-accent-ink">name</code>,{" "}
+          <code className="text-accent-ink">public_reply</code>,{" "}
+          <code className="text-accent-ink">tracked_url</code>,{" "}
+          <code className="text-accent-ink">opening_dm</code>,{" "}
+          <code className="text-accent-ink">opening_dm_button</code>. Keywords go in
           one cell, separated by commas. Use{" "}
-          <code className="text-accent">{"{link}"}</code> in the message to
+          <code className="text-accent-ink">{"{link}"}</code> in the message to
           insert the tracked link.
         </p>
       </div>
@@ -131,7 +131,7 @@ export default function ImportCampaignsPage() {
           onChange={(e) => setCsv(e.target.value)}
           placeholder={SAMPLE}
           rows={10}
-          className="w-full px-4 py-3 rounded bg-surface border border-border text-sm font-mono text-foreground placeholder:text-zinc-600 focus:border-accent/40 focus:outline-none resize-y"
+          className="w-full px-4 py-3 rounded bg-surface border border-border text-sm font-mono text-foreground placeholder:text-muted focus:border-accent/40 focus:outline-none resize-y"
         />
         <button
           type="button"
@@ -145,7 +145,7 @@ export default function ImportCampaignsPage() {
       <div className="flex items-center gap-4">
         <button
           onClick={startImport}
-          className="px-5 py-2 rounded bg-accent text-sm font-medium text-white hover:bg-accent-hover"
+          className="px-5 py-2 rounded bg-accent text-sm font-medium text-on-accent hover:bg-accent-hover"
         >
           Review and import
         </button>

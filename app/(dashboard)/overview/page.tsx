@@ -1,263 +1,343 @@
 "use client";
 
 /**
- * Instagram Overview Page
+ * Analytics
  *
- * Aggregate reach/engagement across your recent posts, plus a per-post table.
- * Views / reach / saved / shares come from Instagram media insights (requires
- * the insights permission); likes and comments are always available.
+ * Post performance for the selected range: the score bar, the trend, when to
+ * post (heatmap), what to post (formats), and every post in a sortable,
+ * filterable explorer with CSV export.
  */
 
-import { useEffect, useState } from "react";
-import AccountSelect from "@/components/account-select";
-import StatCard from "@/components/stat-card";
-import FollowerChart from "@/components/follower-chart";
-import type { OverviewResponse } from "@/app/api/instagram/overview/route";
+import { useMemo, useState } from "react";
+import { Clock, Layers, PlaySquare, RefreshCw, TrendingUp } from "lucide-react";
+import ScoreBar from "@/components/broadcast/score-bar";
+import TrendChart, { type TrendMetric } from "@/components/broadcast/trend-chart";
+import Heatmap from "@/components/broadcast/heatmap";
+import FollowersPanel from "@/components/followers-panel";
+import TopicsPanel from "@/components/topics-panel";
+import { OTHER_CATEGORY } from "@/lib/agents/categories";
+import DataTable, { type Column } from "@/components/broadcast/data-table";
+import {
+  ErrorPanel,
+  PanelHeader,
+  Segmented,
+  Skeleton,
+} from "@/components/broadcast/primitives";
+import { useRange } from "@/components/range-context";
+import { useApi } from "@/lib/use-api";
+import { change } from "@/lib/analytics/range";
+import { compact, full, oneLine, percent, shortDate } from "@/lib/format";
+import type { AnalyticsPost, InstagramAnalytics } from "@/lib/analytics/instagram";
 
-function formatNumber(n: number | null): string {
-  if (n === null) return "—";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString();
-}
+type DailyRow = InstagramAnalytics["daily"][number];
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
+const FORMAT_LABEL: Record<string, string> = {
+  REELS: "Reels",
+  FEED: "Feed posts",
+  CAROUSEL_ALBUM: "Carousels",
+  IMAGE: "Images",
+  VIDEO: "Videos",
+  STORY: "Stories",
+};
 
-const COUNT_OPTIONS = [
-  { value: "25", label: "Last 25" },
-  { value: "50", label: "Last 50" },
-  { value: "100", label: "Last 100" },
-  { value: "all", label: "All time" },
-];
+const VIEW_BANDS = [
+  { value: "0", label: "Any views" },
+  { value: "1000", label: "1K+" },
+  { value: "10000", label: "10K+" },
+  { value: "100000", label: "100K+" },
+] as const;
 
-export default function OverviewPage() {
-  const [data, setData] = useState<OverviewResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedAccountId, setSelectedAccountId] = useState("all");
-  const [count, setCount] = useState("50");
+export default function AnalyticsPage() {
+  const { query, label } = useRange();
+  const [fresh, setFresh] = useState(0);
+  const { data, error, loading, reload } = useApi<InstagramAnalytics>(
+    `/api/analytics/instagram?${query}${fresh ? `&fresh=1&n=${fresh}` : ""}`
+  );
+  const [format, setFormat] = useState("all");
+  const [band, setBand] = useState<(typeof VIEW_BANDS)[number]["value"]>("0");
+  const [topic, setTopic] = useState("all");
+  // Topic edits show at once, before the next fetch.
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [topicError, setTopicError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (selectedAccountId !== "all") {
-      params.set("instagramAccountId", selectedAccountId);
+  async function changeTopic(mediaId: string, category: string) {
+    const before = overrides[mediaId];
+    setOverrides((o) => ({ ...o, [mediaId]: category }));
+    setTopicError(null);
+    const res = await fetch("/api/analytics/post-category", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mediaId, category }),
+    }).catch(() => null);
+    const body = await res?.json().catch(() => null);
+    if (!body?.success) {
+      setOverrides((o) => {
+        const next = { ...o };
+        if (before === undefined) delete next[mediaId];
+        else next[mediaId] = before;
+        return next;
+      });
+      setTopicError(body?.error ?? "Could not save the topic.");
     }
-    params.set("count", count);
-
-    fetch(`/api/instagram/overview?${params}`)
-      .then((r) => r.json())
-      .then((res) => {
-        if (res.success) {
-          setData(res.data);
-          setError(null);
-        } else {
-          setError(res.error ?? "Failed to load overview");
-        }
-      })
-      .catch(() => setError("Failed to load overview"))
-      .finally(() => setLoading(false));
-  }, [selectedAccountId, count]);
-
-  function handleAccountChange(accountId: string) {
-    setLoading(true);
-    setSelectedAccountId(accountId);
   }
 
-  function handleCountChange(next: string) {
-    setLoading(true);
-    setCount(next);
-  }
+  const metrics: Array<TrendMetric<DailyRow>> = [
+    { key: "views", label: "Views", kind: "bar", value: (r) => r.views, previous: (r) => r.previousViews },
+    { key: "interactions", label: "Interactions", kind: "bar", value: (r) => r.interactions },
+    { key: "posts", label: "Posts", kind: "bar", value: (r) => r.posts },
+    { key: "followers", label: "Followers", kind: "line", total: "last", value: (r) => r.followers },
+  ];
 
-  if (loading) {
-    return (
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
-        {[...Array(6)].map((_, i) => (
-          <div key={i} className="panel rounded p-4 h-24 sm:p-5">
-            <div className="h-4 w-16 bg-zinc-200 rounded" />
-            <div className="mt-3 h-6 w-20 bg-zinc-200/60 rounded" />
-          </div>
-        ))}
-      </div>
-    );
-  }
+  const formats = useMemo(() => [...new Set((data?.posts ?? []).map((p) => p.mediaType))], [data]);
+  const categories = useMemo(() => data?.categories ?? [], [data]);
+  const tagged = useMemo(
+    () =>
+      (data?.posts ?? []).map((p) =>
+        overrides[p.id] ? { ...p, category: overrides[p.id], categorySource: "MANUAL" as const } : p
+      ),
+    [data, overrides]
+  );
+  const posts = useMemo(
+    () =>
+      tagged.filter(
+        (p) =>
+          (format === "all" || p.mediaType === format) &&
+          (p.views ?? 0) >= Number(band) &&
+          (topic === "all" || (p.category ?? OTHER_CATEGORY) === topic)
+      ),
+    [tagged, format, band, topic]
+  );
 
-  if (error) {
-    return (
-      <div className="panel rounded p-8 text-center">
-        <p className="text-sm text-error">{error}</p>
-        {error.includes("connect") && (
-          <a
-            href="/api/instagram/connect"
-            className="mt-4 inline-block text-sm text-accent hover:underline"
-          >
-            Connect Instagram
-          </a>
-        )}
-      </div>
-    );
-  }
+  const columns: Array<Column<AnalyticsPost>> = [
+    {
+      key: "post",
+      header: "Post",
+      pinned: true,
+      value: (p) => p.caption ?? "",
+      render: (p) => (
+        <a
+          href={p.permalink ?? "#"}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="group flex min-w-0 max-w-md items-center gap-3"
+        >
+          {p.thumbnailUrl ? (
+            // Instagram CDN thumbnails; next/image would need every CDN host allow-listed.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={p.thumbnailUrl} alt="" loading="lazy" className="h-11 w-8 shrink-0 rounded object-cover" />
+          ) : (
+            <span className="h-11 w-8 shrink-0 rounded bg-surface-sunk" />
+          )}
+          <span className="min-w-0">
+            <span className="block truncate text-foreground group-hover:text-accent-ink">
+              {oneLine(p.caption, 70) || "Untitled post"}
+            </span>
+            <span className="text-xs text-muted">
+              {FORMAT_LABEL[p.mediaType] ?? p.mediaType} · {shortDate(p.timestamp)}
+            </span>
+          </span>
+        </a>
+      ),
+    },
+    {
+      key: "topic",
+      header: "Topic",
+      sortable: true,
+      value: (p) => p.category ?? "",
+      render: (p) => (
+        <select
+          value={p.category ?? ""}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => void changeTopic(p.id, e.target.value)}
+          aria-label="Topic"
+          title={p.categorySource === "MANUAL" ? "Set by you" : p.category ? "Tagged by the agents; change it if it is wrong" : "Not tagged yet"}
+          className={`max-w-[11rem] rounded-md border bg-background px-2 py-1 text-xs ${
+            p.categorySource === "MANUAL" ? "border-foreground font-semibold text-foreground" : "border-border text-muted"
+          }`}
+        >
+          {!p.category && <option value="">Untagged</option>}
+          {[...categories, OTHER_CATEGORY].map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      ),
+    },
+    { key: "date", header: "Date", sortable: true, defaultHidden: true, value: (p) => p.timestamp.slice(0, 10) },
+    { key: "views", header: "Views", align: "right", sortable: true, mobile: true, value: (p) => p.views, render: (p) => <span className="font-semibold text-foreground">{full(p.views)}</span> },
+    { key: "reach", header: "Reach", align: "right", sortable: true, value: (p) => p.reach, render: (p) => full(p.reach) },
+    { key: "likes", header: "Likes", align: "right", sortable: true, mobile: true, value: (p) => p.likes, render: (p) => full(p.likes) },
+    { key: "comments", header: "Comments", align: "right", sortable: true, value: (p) => p.comments, render: (p) => full(p.comments) },
+    { key: "saved", header: "Saves", align: "right", sortable: true, mobile: true, value: (p) => p.saved, render: (p) => full(p.saved) },
+    { key: "shares", header: "Shares", align: "right", sortable: true, value: (p) => p.shares, render: (p) => full(p.shares) },
+    {
+      key: "engagement",
+      header: "Engagement",
+      align: "right",
+      sortable: true,
+      mobile: true,
+      value: (p) => (p.engagementRate === null ? null : Math.round(p.engagementRate * 10000) / 100),
+      render: (p) => percent(p.engagementRate),
+    },
+  ];
 
-  if (!data) return null;
-
-  const { totals, posts, accounts, insightsAvailable, followers, followerHistory } =
-    data;
+  const loadingFirst = loading && !data;
+  const c = data?.current;
+  const p = data?.previous;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-foreground">Overview</h1>
-          <p className="text-sm text-muted mt-1">
-            {data.requestedCount === "all" ? "All-time" : "Recent"} —{" "}
-            {totals.posts} post{totals.posts === 1 ? "" : "s"} from @
-            {data.account.username}
-            {data.truncated ? ` (capped at ${totals.posts})` : ""}
-          </p>
-          {followers !== null && (
-            // Kept out of the tile row below: that row sums the selected posts,
-            // whereas this is a current account-level total.
-            <p className="mt-1 text-sm text-muted">
-              {followers.toLocaleString()} followers
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-          <label className="flex flex-col gap-2 text-sm">
-            <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              Range
-            </span>
-            <select
-              value={count}
-              onChange={(e) => handleCountChange(e.target.value)}
-              className="border-0 bg-transparent py-2 pr-1 text-sm text-foreground outline-none"
-            >
-              {COUNT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {accounts.length > 1 && (
-            <AccountSelect
-              accounts={accounts.map((a) => ({
-                id: a.id,
-                username: a.username,
-                instagramId: a.id,
-              }))}
-              value={selectedAccountId}
-              onChange={handleAccountChange}
-            />
-          )}
-        </div>
-      </div>
+    <div className="space-y-5">
+      <ScoreBar
+        heading={label}
+        caption={data ? `@${data.username} · vs the previous period` : "vs the previous period"}
+        loading={loadingFirst}
+        items={[
+          { label: "Views", value: compact(c?.views), delta: c && p ? change(c.views, p.views) : undefined },
+          { label: "Reach", value: compact(c?.reach), delta: c && p ? change(c.reach, p.reach) : undefined },
+          { label: "Interactions", value: compact(c?.interactions), delta: c && p ? change(c.interactions, p.interactions) : undefined },
+          {
+            label: "Engagement",
+            value: percent(c?.engagementRate, 2),
+            delta: c?.engagementRate != null && p?.engagementRate ? change(c.engagementRate, p.engagementRate) : null,
+          },
+          { label: "Avg views", value: compact(c?.avgViews), delta: c?.avgViews != null && p?.avgViews ? change(c.avgViews, p.avgViews) : null, hint: "per post" },
+          { label: "Posts", value: compact(c?.posts), delta: c && p ? change(c.posts, p.posts) : undefined },
+        ]}
+      />
 
-      {!insightsAvailable && (
-        <div className="panel rounded p-4 border border-border">
-          <p className="text-sm text-foreground">
-            Views, reach, saved and shares need the insights permission.
+      {error && <ErrorPanel message={error} onRetry={reload} />}
+      {data && !data.insightsAvailable && (
+        <div className="panel flex flex-col gap-2 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-foreground">
+            Views, reach, saves and shares need the insights permission. Likes and comments are shown meanwhile.
           </p>
-          <p className="text-sm text-muted mt-1">
-            Reconnect your account to grant it — likes and comments are shown in
-            the meantime.
-          </p>
-          <a
-            href="/api/instagram/connect"
-            className="mt-3 inline-block text-sm text-accent hover:underline"
-          >
+          <a href="/api/instagram/connect" className="font-semibold text-accent-ink hover:underline">
             Reconnect Instagram
           </a>
         </div>
       )}
 
-      {/* Aggregate totals */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-        <StatCard label="Views" value={formatNumber(totals.views)} />
-        <StatCard label="Reach" value={formatNumber(totals.reach)} />
-        <StatCard label="Likes" value={formatNumber(totals.likes)} />
-        <StatCard label="Comments" value={formatNumber(totals.comments)} />
-        <StatCard label="Saved" value={formatNumber(totals.saved)} />
-        <StatCard label="Shares" value={formatNumber(totals.shares)} />
+      <section className="panel p-4 sm:p-5">
+        <PanelHeader
+          icon={TrendingUp}
+          title="Trend"
+          description="Views count toward the day a post went live; the dashed line is the previous period."
+          actions={
+            <button
+              type="button"
+              onClick={() => setFresh((n) => n + 1)}
+              disabled={loading}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-semibold text-muted hover:border-border-hover hover:text-foreground disabled:opacity-50"
+              title={data ? `Data from ${new Date(data.generatedAt).toLocaleTimeString()}` : undefined}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          }
+        />
+        {loadingFirst ? <Skeleton className="h-[330px] w-full" /> : <TrendChart rows={data?.daily ?? []} metrics={metrics} />}
+      </section>
+
+      {data && !loadingFirst && <FollowersPanel data={data} />}
+
+      <div className="grid gap-5 xl:grid-cols-3">
+        <section className="panel p-4 sm:p-5 xl:col-span-2">
+          <PanelHeader icon={Clock} title="When to post" description={`Median views by the hour a post went live · ${label}`} />
+          {loadingFirst ? <Skeleton className="h-56 w-full" /> : <Heatmap cells={data?.heatmap ?? []} timeZone={data?.timeZone ?? "UTC"} />}
+        </section>
+
+        <section className="panel p-4 sm:p-5">
+          <PanelHeader icon={Layers} title="Formats" description="Average views per post" />
+          {loadingFirst ? (
+            <Skeleton className="h-56 w-full" />
+          ) : (
+            <ul className="space-y-4">
+              {(data?.formats ?? []).map((f) => {
+                const max = Math.max(1, ...(data?.formats ?? []).map((x) => x.avgViews));
+                return (
+                  <li key={f.format}>
+                    <div className="flex items-baseline justify-between text-sm">
+                      <span className="font-semibold text-foreground">{FORMAT_LABEL[f.format] ?? f.format}</span>
+                      <span className="font-display text-xl font-bold text-foreground">{compact(f.avgViews)}</span>
+                    </div>
+                    <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-surface-sunk">
+                      <div className="h-full rounded-full bg-series" style={{ width: `${(f.avgViews / max) * 100}%` }} />
+                    </div>
+                    <p className="mt-1 text-xs text-muted">
+                      {f.posts} posts · {percent(f.engagementRate)} engagement
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
       </div>
 
-      {/* Follower trend — account-level, independent of the post range */}
-      <FollowerChart data={followerHistory} followers={followers} />
+      {data && !loadingFirst && (
+        <TopicsPanel
+          posts={tagged}
+          categories={categories}
+          label={label}
+          onPick={(c) => {
+            setTopic(c);
+            document.getElementById("post-explorer")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+      )}
 
-      {/* Per-post table */}
-      <div className="panel rounded p-4 sm:p-6">
-        <h2 className="text-sm font-semibold text-foreground mb-4">Posts</h2>
-        {posts.length === 0 ? (
-          <p className="text-sm text-muted py-8 text-center">No posts found</p>
+      <section id="post-explorer" className="panel scroll-mt-24 p-4 sm:p-5">
+        <PanelHeader icon={PlaySquare} title="Post explorer" description={`Every post published · ${label}`} />
+        {topicError && <p className="mb-3 text-sm text-error">{topicError}</p>}
+        {loadingFirst ? (
+          <Skeleton className="h-96 w-full" />
         ) : (
-          // Eight metric columns can't compress into a phone; let the table keep
-          // its natural width and scroll inside the panel instead.
-          <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 border-b border-border">
-                  <th className="py-2 pr-4 font-medium">Post</th>
-                  <th className="py-2 px-3 font-medium text-right">Views</th>
-                  <th className="py-2 px-3 font-medium text-right">Reach</th>
-                  <th className="py-2 px-3 font-medium text-right">Likes</th>
-                  <th className="py-2 px-3 font-medium text-right">Comments</th>
-                  <th className="py-2 px-3 font-medium text-right">Saved</th>
-                  <th className="py-2 px-3 font-medium text-right">Shares</th>
-                  <th className="py-2 pl-3 font-medium text-right">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {posts.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="border-b border-border last:border-0"
-                  >
-                    <td className="py-3 pr-4 max-w-xs">
-                      {p.permalink ? (
-                        <a
-                          href={p.permalink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-foreground hover:text-accent truncate block"
-                        >
-                          {p.caption || `${p.mediaType} post`}
-                        </a>
-                      ) : (
-                        <span className="text-foreground truncate block">
-                          {p.caption || `${p.mediaType} post`}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-3 text-right text-muted">
-                      {formatNumber(p.views)}
-                    </td>
-                    <td className="py-3 px-3 text-right text-muted">
-                      {formatNumber(p.reach)}
-                    </td>
-                    <td className="py-3 px-3 text-right text-muted">
-                      {formatNumber(p.likes)}
-                    </td>
-                    <td className="py-3 px-3 text-right text-muted">
-                      {formatNumber(p.comments)}
-                    </td>
-                    <td className="py-3 px-3 text-right text-muted">
-                      {formatNumber(p.saved)}
-                    </td>
-                    <td className="py-3 px-3 text-right text-muted">
-                      {formatNumber(p.shares)}
-                    </td>
-                    <td className="py-3 pl-3 text-right text-zinc-500">
-                      {formatDate(p.timestamp)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={posts}
+            columns={columns}
+            rowKey={(r) => r.id}
+            searchText={(r) => `${r.caption ?? ""} ${r.category ?? ""}`}
+            searchPlaceholder="Search captions"
+            initialSort={{ key: "views", dir: "desc" }}
+            exportName={`openreply-posts-${query.replace(/[^a-z0-9]+/gi, "-")}`}
+            emptyTitle="No posts match"
+            emptyHint="Widen the range or clear the filters."
+            filters={
+              <div className="flex flex-wrap gap-2">
+                <Segmented
+                  label="Format"
+                  size="sm"
+                  value={format}
+                  onChange={setFormat}
+                  options={[
+                    { value: "all", label: "All" },
+                    ...formats.map((f) => ({ value: f, label: FORMAT_LABEL[f] ?? f })),
+                  ]}
+                />
+                <Segmented label="Views" size="sm" value={band} onChange={setBand} options={VIEW_BANDS} />
+                <label className="sr-only" htmlFor="topic-filter">Topic</label>
+                <select
+                  id="topic-filter"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  className={`h-8 rounded-md border bg-background px-2 text-xs font-semibold ${
+                    topic === "all" ? "border-border text-muted" : "border-foreground text-foreground"
+                  }`}
+                >
+                  <option value="all">All topics</option>
+                  {[...categories, OTHER_CATEGORY].map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            }
+          />
         )}
-      </div>
+      </section>
     </div>
   );
 }

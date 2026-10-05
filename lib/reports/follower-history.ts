@@ -5,15 +5,6 @@ import {
   type FollowerCountPoint,
 } from "@/lib/meta/client";
 
-export interface FollowerHistoryPoint {
-  /** ISO date (YYYY-MM-DD). */
-  date: string;
-  /** Absolute follower total on that day. */
-  followers: number;
-  /** Net change from the previous point, when one exists. */
-  delta: number | null;
-}
-
 /** Midnight UTC for a date, so one calendar day maps to exactly one row. */
 function toUtcDay(value: Date | string): Date {
   const d = typeof value === "string" ? new Date(`${value}T00:00:00Z`) : value;
@@ -142,40 +133,18 @@ export async function backfillFollowerHistory(
 }
 
 /**
- * Read stored follower history for an account, most recent `days` first
- * converted to ascending order for charting.
- */
-export async function getFollowerHistory(
-  instagramAccountId: string,
-  days: number = 90
-): Promise<FollowerHistoryPoint[]> {
-  const since = toUtcDay(new Date());
-  since.setUTCDate(since.getUTCDate() - Math.max(days, 1));
-
-  const rows = await prisma.followerSnapshot.findMany({
-    where: { instagramAccountId, date: { gte: since } },
-    orderBy: { date: "asc" },
-    select: { date: true, followersCount: true },
-  });
-
-  return rows.map((row, i) => ({
-    date: toIsoDay(row.date),
-    followers: row.followersCount,
-    delta: i === 0 ? null : row.followersCount - rows[i - 1].followersCount,
-  }));
-}
-
-/**
  * Ensure an account has a current snapshot and, the first time we ever see it,
- * a backfilled history. Called from the overview endpoint so the chart fills in
- * without waiting for the next cron run.
+ * a backfilled history. Called from the analytics service so the follower
+ * chart fills in without waiting for the next cron run. Pass the follower
+ * count when the caller already fetched it, to save a Graph call.
  */
 export async function ensureFollowerHistory(
   account: { id: string; instagramId: string },
-  accessToken: string
+  accessToken: string,
+  knownFollowers?: number
 ): Promise<number | null> {
-  const info = await getUserInfo(accessToken);
-  const followers = info.followers_count;
+  const followers =
+    knownFollowers ?? (await getUserInfo(accessToken)).followers_count;
   if (typeof followers !== "number") return null;
 
   await recordFollowerSnapshot(account.id, followers);

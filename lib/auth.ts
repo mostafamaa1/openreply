@@ -1,10 +1,13 @@
 import NextAuth, { type NextAuthConfig } from "next-auth";
 import Nodemailer from "next-auth/providers/nodemailer";
 import Resend from "next-auth/providers/resend";
+import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/client";
 import { ensureWorkspaceForUser, getPrimaryWorkspace } from "@/lib/workspace";
 import { isEmailAllowedToSignIn } from "@/lib/env";
+import { verifyPassword } from "@/lib/password";
+import { clearAttempts, reserveAttempt } from "@/lib/login-throttle";
 
 type AdapterPrismaClient = Parameters<typeof PrismaAdapter>[0];
 
@@ -19,10 +22,44 @@ const smtpServer = process.env.EMAIL_SERVER;
  * so it is derived here rather than hardcoded at the call site.
  */
 export const EMAIL_PROVIDER_ID = smtpServer ? "nodemailer" : "resend";
+export const PASSWORD_PROVIDER_ID = "password";
+
+/**
+ * Email + password sign-in. There is no sign-up form: a password is set with
+ * `npm run set-password` or from Settings, so this never creates accounts.
+ */
+const passwordProvider = Credentials({
+  id: PASSWORD_PROVIDER_ID,
+  name: "Email and password",
+  credentials: {
+    email: { label: "Email", type: "email" },
+    password: { label: "Password", type: "password" },
+  },
+  async authorize(credentials) {
+    const email = String(credentials?.email ?? "").trim().toLowerCase();
+    const password = String(credentials?.password ?? "");
+    if (!email || !password || !isEmailAllowedToSignIn(email)) return null;
+    // Count the attempt before checking it, so parallel guesses share the
+    // same 10-per-15-minutes budget.
+    if (!(await reserveAttempt("login", email))) return null;
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, name: true, passwordHash: true },
+    });
+    const ok = user?.passwordHash
+      ? await verifyPassword(password, user.passwordHash)
+      : false;
+    if (!user || !ok) return null;
+    await clearAttempts("login", email);
+    return { id: user.id, email: user.email, name: user.name };
+  },
+});
 
 export const authConfig = {
   adapter: PrismaAdapter(prisma as unknown as AdapterPrismaClient),
   providers: [
+    passwordProvider,
     smtpServer
       ? Nodemailer({ server: smtpServer, from: emailFrom })
       : Resend({
@@ -36,9 +73,15 @@ export const authConfig = {
     async signIn({ user }) {
       return isEmailAllowedToSignIn(user?.email);
     },
-    async session({ session, user }) {
-      if (session.user) {
-        session.user.id = user.id;
+    // Sessions are JWTs (the password provider cannot use database
+    // sessions), so the user id travels in the token.
+    async jwt({ token, user }) {
+      if (user?.id) token.sub = user.id;
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user && token.sub) {
+        session.user.id = token.sub;
       }
       return session;
     },
@@ -55,7 +98,8 @@ export const authConfig = {
     verifyRequest: "/verify-request",
   },
   session: {
-    strategy: "database",
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60,
   },
   trustHost: true,
   secret: process.env.NEXTAUTH_SECRET,

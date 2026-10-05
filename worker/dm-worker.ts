@@ -2,9 +2,48 @@ import { createDMWorker } from "@/lib/queue/dm-worker";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
 import { attachNextReel } from "@/lib/polling/next-reel-binder";
+import {
+  createContentAgentsWorker,
+  failInterruptedRuns,
+  getAgentsCron,
+  scheduleContentAgents,
+} from "@/lib/queue/content-agents";
+import { getTimeZone } from "@/lib/agents/config";
 import os from "node:os";
 
 const worker = createDMWorker();
+// Weekly content agents. The schedule is a BullMQ job scheduler in Redis, so
+// it costs no database polling while it waits. Interrupted runs are cleared
+// before the worker takes its first job.
+const contentWorker = createContentAgentsWorker();
+failInterruptedRuns()
+  .then((n) => n > 0 && console.log(`[DM Worker] Marked ${n} interrupted agent run(s) failed`))
+  .catch((error) =>
+    console.error(
+      "[DM Worker] Could not clear interrupted agent runs:",
+      error instanceof Error ? error.message : error
+    )
+  )
+  .finally(() => {
+    contentWorker.run().catch((error) =>
+      console.error(
+        "[DM Worker] Content agents worker stopped:",
+        error instanceof Error ? error.message : error
+      )
+    );
+  });
+scheduleContentAgents()
+  .then(() =>
+    console.log(
+      `[DM Worker] Content agents scheduled: "${getAgentsCron()}" ${getTimeZone()}`
+    )
+  )
+  .catch((error) =>
+    console.error(
+      "[DM Worker] Content agents schedule failed:",
+      error instanceof Error ? error.message : error
+    )
+  );
 const startedAt = new Date().toISOString();
 const HEARTBEAT_INTERVAL_MS = 30_000;
 // Polling safety net for comments that webhooks miss. Runs in the worker because
@@ -74,7 +113,7 @@ async function shutdown(signal: string) {
   clearInterval(heartbeatTimer);
   clearInterval(pollTimer);
   clearInterval(nextReelTimer);
-  await worker.close();
+  await Promise.all([worker.close(), contentWorker.close()]);
   process.exit(0);
 }
 

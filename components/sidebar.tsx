@@ -3,21 +3,14 @@
 /**
  * Sidebar Navigation
  *
- * Text-only nav with active state and workspace section.
+ * The navy rail of the broadcast world: grouped sections with icons, the
+ * current page marked by a yellow tab. Slides in as a drawer on phones.
  */
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const navItems = [
-  { label: "Dashboard", href: "/dashboard" },
-  { label: "Overview", href: "/overview" },
-  { label: "Inbox", href: "/inbox" },
-  { label: "Campaigns", href: "/campaigns" },
-  { label: "DM Logs", href: "/logs" },
-  { label: "Settings", href: "/settings" },
-  { label: "Diagnostics", href: "/diagnostics" },
-];
+import { X } from "lucide-react";
+import { NAV_GROUPS } from "@/components/nav-items";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -25,70 +18,88 @@ interface SidebarProps {
   workspaceName: string;
 }
 
-export default function Sidebar({
-  isOpen,
-  onClose,
-  workspaceName,
-}: SidebarProps) {
+export default function Sidebar({ isOpen, onClose, workspaceName }: SidebarProps) {
   const pathname = usePathname();
 
   return (
     <>
-      {/* Mobile overlay */}
       {isOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          className="fixed inset-0 z-40 bg-[#020814]/60 backdrop-blur-[2px] lg:hidden"
           onClick={onClose}
         />
       )}
 
       <aside
         className={`
-          fixed top-0 left-0 z-50 h-dvh w-64 max-w-[85vw] shrink-0 bg-surface border-r border-border flex flex-col
+          fixed top-0 left-0 z-50 flex h-dvh w-64 max-w-[85vw] shrink-0 flex-col bg-bar text-bar-fg
           transition-transform duration-200 ease-out
-          lg:h-full lg:translate-x-0 lg:static lg:z-auto
+          lg:static lg:z-auto lg:h-full lg:translate-x-0
           ${isOpen ? "translate-x-0" : "-translate-x-full"}
         `}
       >
-        {/* Same reason as the top bar: the drawer is full height, so the
-            wordmark would otherwise land under the status bar. */}
         <div
-          className="px-6 py-5 border-b border-border"
+          className="flex items-center justify-between px-5 pb-4"
           style={{ paddingTop: "calc(1.25rem + env(safe-area-inset-top))" }}
         >
-          <Link href="/dashboard" className="text-base font-semibold">
-            OpenReply
+          <Link href="/dashboard" className="flex items-center gap-2.5" onClick={onClose}>
+            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-accent font-display text-lg font-bold leading-none text-on-accent">
+              O
+            </span>
+            <span className="font-display text-xl font-bold uppercase tracking-wide">
+              OpenReply
+            </span>
           </Link>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-bar-muted hover:text-bar-fg lg:hidden"
+            aria-label="Close menu"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive =
-              pathname === item.href || pathname.startsWith(item.href + "/");
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                aria-current={isActive ? "page" : undefined}
-                className={`
-                  block px-3 py-2.5 rounded text-sm
-                  ${
-                    isActive
-                      ? "bg-surface-hover text-foreground font-medium"
-                      : "text-muted hover:text-foreground hover:bg-surface-hover"
-                  }
-                `}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
+        <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-2">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-bar-muted">
+                {group.label}
+              </p>
+              <ul className="space-y-0.5">
+                {group.items.map((item) => {
+                  const active =
+                    pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  const Icon = item.icon;
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        onClick={onClose}
+                        aria-current={active ? "page" : undefined}
+                        className={`group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors ${
+                          active
+                            ? "bg-white/10 font-semibold text-bar-fg"
+                            : "text-bar-muted hover:bg-white/5 hover:text-bar-fg"
+                        }`}
+                      >
+                        <Icon
+                          className={`h-[18px] w-[18px] ${active ? "text-accent" : ""}`}
+                          strokeWidth={2}
+                        />
+                        {item.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </nav>
 
-        <div className="px-5 py-4 border-t border-border">
-          <p className="text-sm text-foreground truncate">{workspaceName}</p>
-          <p className="text-xs text-muted">Self-hosted</p>
+        <div className="border-t border-bar-line px-5 py-4">
+          <p className="truncate text-sm font-medium text-bar-fg">{workspaceName}</p>
+          <p className="text-xs text-bar-muted">Self-hosted</p>
         </div>
       </aside>
     </>
